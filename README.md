@@ -1,7 +1,7 @@
 bsnapshot
 =============================
 
-systemd based backup schedules for [restic](https://restic.net/) with per-instance config files
+btrfs based backup tool with daily/weekly/monthly/yearly schedules 
 
 ## Features ##
 
@@ -13,6 +13,17 @@ systemd based backup schedules for [restic](https://restic.net/) with per-instan
 ## Usage ##
 
 bsnapshot has one magic command called `backup` - it executed the daily/weekly/monthly/yearly schedules and finally applies the backup retention policies to remove outdated snapshot.
+
+```
+Usage: bsnapshot <command> [args...]
+btrfs based backup tool with daily/weekly/monthly/yearly schedules 
+    
+    backup                  create snapshot(s) and apply retention policy
+    list                    List all available snapshots
+    
+    --help                  Displays this help
+    --version               Displays version
+```
 
 **Example**
 
