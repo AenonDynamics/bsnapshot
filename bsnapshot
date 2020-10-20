@@ -1,0 +1,239 @@
+#!/bin/bash
+
+# ----------------------------------------------------------------------
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# --
+# Copyright 2020 Andi Dittrich <https://aenon-dynamics.com>
+# ----------------------------------------------------------------------
+
+# bsnapshot https://github.com/AenonDynamics/bsnapshot
+VERSION="0.1.0"
+
+show_usage(){
+    cat << EOF
+Usage: bsnapshot <command> [args...]
+btrfs based backup tool with daily/weekly/monthly/yearly schedules 
+    
+    backup                  create snapshot(s) and apply retention policy
+    list                    List all available snapshots
+    
+    --help                  Displays this help
+    --version               Displays version
+EOF
+    exit 0
+}
+
+show_version(){
+    cat << EOF
+bsnapshot - btrfs based backup tool with daily/weekly/monthly/yearly schedules
+ - Version: ${VERSION}
+ - License: MPL-2.0 http://mozilla.org/MPL/2.0/
+ - Repository: https://github.com/AenonDynamics/bsnapshot
+EOF
+    exit 0
+}
+
+# simple processing because of variadic arguments
+[ "$1" = "--help" ] || [ "$1" = "-h" ] && show_usage
+[ "$1" = "--version" ] || [ "$1" = "-v" ] && show_version
+
+# task config available ?
+[ ! -f "/etc/bsnapshot.conf" ] && { echo >&2 "configuration file </etc/bsnapshot.conf> not found"; exit 1; }
+
+# load config
+source /etc/bsnapshot.conf
+
+# error handling
+fatal(){
+    echo "ERROR: $1"
+    exit 1
+}
+
+# parse options
+# ---------------------------------------
+bsnapshot_prepare(){
+
+    # source dir exists ?
+    [ ! -d "$SOURCE_DIR" ] && fatal "source directory [${SOURCE_DIR}] doesn't exist"
+
+    # snapshot dir exists ?
+    [ ! -d "$SNAPSHOT_DIR" ] && fatal "snapshot directory [${SNAPSHOT_DIR}] doesn't exist"
+
+    # is source directory a btrfs subvolume ?
+    btrfs subvolume show "${SOURCE_DIR}" &>/dev/null || fatal "source directory [${SOURCE_DIR}] isn't a btrfs subvolume "
+}
+
+# Create single snapshot
+# ---------------------------------------
+bsnapshot_create_snapshot(){
+
+    # dates
+    local TS=$(date +%Y%m%dT%H%M%S)
+    local TS_NOW=$(date +%s)
+    
+    # snapshot tag
+    local SNAPSHOT_TAG="$1"
+
+    # generate snapshot name
+    local SNAPSHOT_NAME="${SNAPSHOT_TAG}-$TS"
+
+    # minimal time between snapshots
+    local MIN_TIME_DIFF="$2"
+
+    # snapshot tag given ?
+    [ -z "${SNAPSHOT_TAG}" ] && fatal "snapshot tag not set"
+
+    # time diff given ?
+    [ -z "${MIN_TIME_DIFF}" ] && fatal "minimal time between snapshots not set"
+
+    # snapshot tag exists ?
+    [ ! -d "${SNAPSHOT_DIR}/${SNAPSHOT_TAG}" ] && {
+        echo "snapshot tag [${SNAPSHOT_TAG}] doesn't exist...creating"
+        mkdir -p ${SNAPSHOT_DIR}/${SNAPSHOT_TAG}
+    }
+
+    # snapshot exists ?
+    [ -d "${SNAPSHOT_DIR}/${SNAPSHOT_TAG}/${SNAPSHOT_NAME}" ] && {
+        fatal "snapshot already exists"
+    }
+
+    # get previous snapshot - use the filename timestamp for ASC sorting
+    local LAST_SNAPSHOT_NAME=$(ls -A1 "${SNAPSHOT_DIR}/${SNAPSHOT_TAG}" | tail -n 1)
+    local LAST_SNAPSHOT_PATH="${SNAPSHOT_DIR}/${SNAPSHOT_TAG}/${LAST_SNAPSHOT_NAME}"
+
+    # last snapshot exists ?
+    [ ! -z "${LAST_SNAPSHOT_NAME}" ] && [ -d "${LAST_SNAPSHOT_PATH}" ] && {
+        # get modification timestamp (unix s)
+        local CREATION_TIME=$(btrfs subvolume show "${LAST_SNAPSHOT_PATH}" | grep "Creation" | cut -f4)
+
+        # parse date string
+        local TS_CREATION=$(date -d "${CREATION_TIME}" +%s)
+
+        # valid timestamp found ?
+        [ -z "${TS_CREATION}" ] && fatal "cannot obtain snapshot creation time"
+
+        # last snapshot older than limit ?
+        if (( (TS_NOW - TS_CREATION) < MIN_TIME_DIFF )); then
+            echo "no new snapshot required (minimal time between last snapshot not exceeded)"
+            echo "last snapshot created on ${CREATION_TIME}"
+            echo ""
+            return 0
+        fi
+    } || {
+        echo "no previous snapshot found"
+    }
+
+    # create snapshot
+    btrfs subvolume snapshot -r "${SOURCE_DIR}" "${SNAPSHOT_DIR}/${SNAPSHOT_TAG}/${SNAPSHOT_NAME}" && {
+        echo "snapshot created"
+    } || fatal "failed to create snapshot"
+}
+
+# snapshot retention
+# ---------------------------------------
+bsnapshot_retention_policy(){
+
+    # dates
+    local TS_NOW=$(date +%s)
+    
+    # snapshot tag
+    local SNAPSHOT_TAG="$1"
+
+    # retention time in seconds
+    local RETENTION_TIME="$2"
+
+    # snapshot tag given ?
+    [ -z "${SNAPSHOT_TAG}" ] && fatal "snapshot tag not set"
+
+    # retention time given ?
+    [ "${RETENTION_TIME}" -lt "3600" ] && fatal "invalid retention time"
+
+    # snapshot tag exists ?
+    [ ! -d "${SNAPSHOT_DIR}/${SNAPSHOT_TAG}" ] && fatal "snapshot tag [${SNAPSHOT_TAG}] doesn't exist"
+
+    # loop through snapshots
+    for SNAPSHOT in ${SNAPSHOT_DIR}/${SNAPSHOT_TAG}/*; do
+        # get modification timestamp (unix s)
+        local CREATION_TIME=$(btrfs subvolume show "${SNAPSHOT}" | grep "Creation" | cut -f4)
+
+        # parse date string
+        local TS_CREATION=$(date -d "${CREATION_TIME}" +%s)
+
+        # valid timestamp ?
+        [ -z "${TS_CREATION}" ] && fatal "cannot obtain snapshot creation time"
+        [ "${TS_CREATION}" -lt "3600" ] && fatal "invalid snapshot creation time"
+
+        # delete snapshot ?
+        if (( (TS_NOW - TS_CREATION) > RETENTION_TIME )); then
+            btrfs subvolume delete "$SNAPSHOT"
+        fi
+
+    done
+}
+
+# command::backup
+# ---------------------------------------
+bsnapshot_backup(){
+    # time bewteen snapshots includes 1h margin!
+
+    # create daily snapshots ?
+    if [ ! -z "${RETENTION_POLICY_DAYS}" ] && [ "${RETENTION_POLICY_DAYS}" -gt "0" ]; then
+        echo " > daily snapshots enabled"
+        bsnapshot_create_snapshot "daily" $(( 86400 - 3600 ))
+        bsnapshot_retention_policy "daily" $(( RETENTION_POLICY_DAYS * 86400 ))
+    fi
+
+    # create weekly snapshots ? 7 days/week
+    if [ ! -z "${RETENTION_POLICY_WEEKS}" ] && [ "${RETENTION_POLICY_WEEKS}" -gt "0" ]; then
+        echo " > weekly snapshots enabled"
+        bsnapshot_create_snapshot "weekly" $(( 604800 - 3600 ))
+        bsnapshot_retention_policy "weekly" $(( RETENTION_POLICY_WEEKS * 604800 ))
+    fi
+
+    # create monthly snapshots ? 30 days/month
+    if [ ! -z "${RETENTION_POLICY_MONTHS}" ] && [ "${RETENTION_POLICY_MONTHS}" -gt "0" ]; then
+        echo " > monthly snapshots enabled"
+        bsnapshot_create_snapshot "monthly" $(( 2592000 - 3600 ))
+        bsnapshot_retention_policy "monthly" $(( RETENTION_POLICY_MONTHS * 2592000 ))
+    fi
+
+    # create yearly snapshots ? 365 days/year
+    if [ ! -z "${RETENTION_POLICY_YEARS}" ] && [ "${RETENTION_POLICY_YEARS}" -gt "0" ]; then
+        echo " > yearly snapshots enabled"
+        bsnapshot_create_snapshot "yearly" $(( 31536000 - 3600 ))
+        bsnapshot_retention_policy "yearly" $(( RETENTION_POLICY_YEARS * 31536000 ))
+    fi
+
+    # Wait until subvolumes are completely removed from the filesystem
+    btrfs subvolume sync "${SNAPSHOT_DIR}"
+}
+
+# command::list
+# ---------------------------------------
+bsnapshot_list(){
+    tree -L 2 "${SNAPSHOT_DIR}"
+}
+
+# Command Dispatching
+# ---------------------------------------
+case "$1" in
+    backup)
+        bsnapshot_prepare "$@"
+        bsnapshot_backup
+        exit 0
+    ;;
+
+    list)
+        :
+        bsnapshot_prepare "$@"
+        bsnapshot_list
+        exit 0
+    ;;
+
+    *)
+        show_usage
+        exit 1
+    ;;
+esac
