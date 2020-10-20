@@ -83,7 +83,7 @@ apt-get install bsnapshot
 ### Manual setup ###
 
 * Copy `bsnapshot` to `/usr/sbin/bsnapshot`
-* Create the configuration file in `/etc/restic`
+* Create the configuration file `/etc/bsnapshot.conf`
 
 ## Configuraton ##
 
@@ -93,7 +93,7 @@ You have to set a source directory (a btrfs subvolume + valid mountpoint) from w
 
 File: `/etc/bsnapshot.conf`
 
-```conf
+```bash
 ...
 # btrfs source volume
 SOURCE_DIR="/mnt/data"
@@ -113,7 +113,7 @@ By setting a policy to zero (or left empty) the backup group **will be disabled*
 
 File: `/etc/bsnapshot.conf`
 
-```conf
+```bash
 ...
 # keep 14 daily snapshots
 RETENTION_POLICY_DAYS=14
