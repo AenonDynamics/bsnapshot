@@ -1,6 +1,6 @@
 {
     "name": "bsnapshot",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "package-monster": "0.4.0",
     "description": "btrfs based backup tool with daily/weekly/monthly/yearly schedules",
     "license": "MPL-2.0",

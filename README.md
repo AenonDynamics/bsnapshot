@@ -15,14 +15,17 @@ btrfs based backup tool with daily/weekly/monthly/yearly schedules
 bsnapshot has one magic command called `backup` - it executed the daily/weekly/monthly/yearly schedules and finally applies the backup retention policies to remove outdated snapshot.
 
 ```
-Usage: bsnapshot <command> [args...]
-btrfs based backup tool with daily/weekly/monthly/yearly schedules 
-    
+Usage: bsnapshot [options...] <command>
+btrfs based backup tool with daily/weekly/monthly/yearly schedules
+
+Options:
+    -h,--help               Displays this help
+    -v,--version            Displays version
+    -c <filename>           Use specific configuration file
+
+Commands:
     backup                  create snapshot(s) and apply retention policy
     list                    List all available snapshots
-    
-    --help                  Displays this help
-    --version               Displays version
 ```
 
 **Example**
@@ -69,6 +72,11 @@ To get an overview of all snapshots, just run the `list` command:
 └── yearly
     └── yearly-20201020T190905
 ```
+
+### CLI Options ###
+
+
+
 
 ## Package Installation ##
 

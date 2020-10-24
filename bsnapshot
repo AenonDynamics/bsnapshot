@@ -9,18 +9,22 @@
 # ----------------------------------------------------------------------
 
 # bsnapshot https://github.com/AenonDynamics/bsnapshot
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 show_usage(){
     cat << EOF
-Usage: bsnapshot <command> [args...]
-btrfs based backup tool with daily/weekly/monthly/yearly schedules 
-    
+Usage: bsnapshot [options...] <command>
+btrfs based backup tool with daily/weekly/monthly/yearly schedules
+
+Options:
+    -h,--help               Displays this help
+    -v,--version            Displays version
+    -c <filename>           Use specific configuration file
+
+Commands:
     backup                  create snapshot(s) and apply retention policy
     list                    List all available snapshots
-    
-    --help                  Displays this help
-    --version               Displays version
+
 EOF
     exit 0
 }
@@ -35,21 +39,44 @@ EOF
     exit 0
 }
 
-# simple processing because of variadic arguments
-[ "$1" = "--help" ] || [ "$1" = "-h" ] && show_usage
-[ "$1" = "--version" ] || [ "$1" = "-v" ] && show_version
-
-# task config available ?
-[ ! -f "/etc/bsnapshot.conf" ] && { echo >&2 "configuration file </etc/bsnapshot.conf> not found"; exit 1; }
-
-# load config
-source /etc/bsnapshot.conf
-
 # error handling
 fatal(){
-    echo "ERROR: $1"
+    echo >&2 "ERROR: $1"
     exit 1
 }
+
+# simple processing for help+versioning commands
+[ "$1" = "--help" ] || [ "$1" = "-h" ] || [ -z "$1" ] && show_usage
+[ "$1" = "--version" ] || [ "$1" = "-v" ] && show_version
+
+# defaults
+CONF_FILENAME="/etc/bsnapshot.conf"
+
+# process args
+while getopts ":c:" opt; do
+    case ${opt} in
+        # set explicit config
+        c)
+            CONF_FILENAME=$OPTARG
+            ;;
+        # handle invalid options
+        \?)
+            fatal "unknown option [-${OPTARG}]"
+            ;;
+        
+        # handle required arguments
+        :)
+            fatal "option [-${OPTARG}] requires an argument"
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
+# task config available ?
+[ ! -f "${CONF_FILENAME}" ] && { fatal "configuration file [${CONF_FILENAME}] not found"; }
+
+# load config
+source ${CONF_FILENAME}
 
 # parse options
 # ---------------------------------------
@@ -226,13 +253,13 @@ case "$1" in
     ;;
 
     list)
-        :
         bsnapshot_prepare "$@"
         bsnapshot_list
         exit 0
     ;;
 
     *)
+        echo "command not found"
         show_usage
         exit 1
     ;;
